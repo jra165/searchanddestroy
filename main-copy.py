@@ -5,56 +5,27 @@ from queue import PriorityQueue, Queue
 from typing import List, Tuple
 
 
-def _calculate_distance(curr_cell: Tuple[int, int], prev_cell: Tuple[int, int]) -> int:
-    """
-    Calculate manhattan distance between cells
-    :param curr_cell:
-    :param prev_cell:
-    :return: manhattan distance
-    """
+def _calculate_distance(curr_cell, prev_cell):
     distance = abs(curr_cell[0] - prev_cell[0]) + abs(curr_cell[1] - prev_cell[1])
     return distance
 
 
-def generate_landscape(agent) -> List[List[float]]:
-    """
-    Generate initial landscape. The value of each cell corresponds to the probability of a false negative for that cell.
-    0.1: flat
-    0.3: hilly
-    0.7: forested
-    0.9: caves
-    :return: the generated landscape
-    """
+terrainDict = {
+    1: 0.1,
+    2: 0.3,
+    3: 0.7,
+    4: 0.9
+}
 
-    landscape = [[0.0 for _ in range(agent._d)] for _ in range(agent._d)]
-
+def generate_landscape(agent):
+    landscape = [[0]*agent._d]*agent._d
     # Randomly assign the terrains
     for i in range(agent._d):
         for j in range(agent._d):
-            terrain_probability = random.uniform(0, 1)
-
-            # Assign cell to flat
-            if terrain_probability < 0.2:
-                landscape[i][j] = 0.1
-
-            # Assign cell to hilly
-            elif terrain_probability < 0.5:
-                landscape[i][j] = 0.3
-
-            # Assign cell to forested
-            elif terrain_probability < 0.8:
-                landscape[i][j] = 0.7
-
-            # Assign cell to caves
-            else:
-                landscape[i][j] = 0.9
-
+            landscape[i][j] = terrainDict[random.randint(1, 4)]
     return landscape
 
-def pick_random_cell(agent) -> Tuple[int, int]:
-    """
-    Pick a random cell in the board.
-    """
+def pick_random_cell(agent):
     i = random.randint(0, agent._d - 1)
     j = random.randint(0, agent._d - 1)
     return i, j
@@ -66,15 +37,14 @@ class Agent:
         self._belief_states: List[List[float]] = [[1 / (self._d * self._d) for _ in range(self._d)] for _ in
                                                     range(self._d)]
         self._probability_queue: PriorityQueue[Tuple[float, Tuple[int, int]]] = PriorityQueue()
+        for i in range(d):
+            for j in range(d):
+                self._probability_queue.put((-1*self._belief_states[i][j], (i,j)))
         self.target = pick_random_cell(self)
         self.proximity_history: List[List[float]] = [[0 for _ in range(self._d)] for _ in
                                                     range(self._d)]
         self.most_recent_searches = Queue(10)
         return
-
-
-dimension = 10
-SimpleAgent = Agent(dimension)
 
 def _change_target(agent) -> None:
         prev_target = agent.target
@@ -92,7 +62,7 @@ def _change_target(agent) -> None:
                 new_target = (prev_target[0], prev_target[1]+1)
 
             # Go left
-            if move_flag == 2:
+            elif move_flag == 2:
                 new_target = (prev_target[0]-1, prev_target[1])
 
             # Go right
@@ -103,16 +73,6 @@ def _change_target(agent) -> None:
                 successful_move = True
 
         agent.target = new_target
-
-
-landscape = generate_landscape(SimpleAgent)
-
-probability_queue = PriorityQueue()
-for i in range(SimpleAgent._d):
-    for j in range(SimpleAgent._d):
-        probability_queue.put((-1 * SimpleAgent._belief_states[i][j], (i, j)))
-SimpleAgent._probability_queue = probability_queue
-
 
 def _update_probability_queue(agent, observed_cell: Tuple[int, int], observed_prior_probability: float, version: str, part2_flag: bool) -> None:
     """
@@ -139,8 +99,27 @@ def _update_probability_queue(agent, observed_cell: Tuple[int, int], observed_pr
         total_probability_sum += agent._belief_states[curr_cell[1][0]][curr_cell[1][1]]
 
     # Recreate the probability_queue with updated values
-    agent._probability_queue = _normalize_belief_states(agent, total_probability_sum, updated_queue, observed_cell,
-                                                            version, part2_flag)
+    scaling_factor = 1 / total_probability_sum
+    for i in range(agent._d):
+        for j in range(agent._d):
+            if version == "rule_1" or version == "rule_2" or version == "agent_1" or version == "agent_2":
+                agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
+
+                if not part2_flag:
+                    updated_queue.put((-1 * agent._belief_states[i][j], (i, j)))
+                else:
+                    priority = -1 * (agent._belief_states[i][j] + agent.proximity_history[i][j])
+                    updated_queue.put((priority, (i, j)))
+
+            # NOTE the version == "improved" if condition should rly go here but agent_3 is kind of wack
+            elif version == "agent_3" or version == "improved":
+                agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
+                if not part2_flag:
+                    updated_queue.put(((_calculate_distance(observed_cell, (i, j)) + 1) / agent._belief_states[i][j], (i, j)))
+                else:
+                    priority = (_calculate_distance(observed_cell, (i, j)) + 1) / agent._belief_states[i][j] + agent.proximity_history[i][j]
+                    updated_queue.put((priority, (i, j)))
+    agent._probability_queue = updated_queue
 
 def _calculate_new_probability(agent, curr_cell: Tuple[float, Tuple[int, int]], observed_cell: Tuple[int, int],
                                    observed_prior: float, flag: str):
@@ -204,7 +183,6 @@ def _update_part_2(agent, curr_cell: Tuple[int, int]) -> None:
         # Move target
         _change_target(agent)
 
-
 def _handle_ties(agent, curr_cell: Tuple[float, Tuple[int, int]], prev_cell: Tuple[float, Tuple[int, int]]) -> Tuple[float, Tuple[int, int]]:
     # Create a list to track cells removed from the queue in this step and add initial cell to the List
     popped_cells: List[Tuple[float, Tuple[int, int]]] = [curr_cell]
@@ -239,71 +217,6 @@ def _handle_ties(agent, curr_cell: Tuple[float, Tuple[int, int]], prev_cell: Tup
 
     return chosen_cell
 
-def _normalize_belief_states(agent, total_probability_sum: int, updated_queue: PriorityQueue,observed_cell: Tuple[int, int], version: str, part2_flag: bool):
-        """
-        Scale the probability values so the total probability is 1
-        :param total_probability_sum:
-        :param updated_queue:
-        :return:
-        """
-
-        scaling_factor = 1 / total_probability_sum
-        print("scaling: ", scaling_factor)
-        for i in range(agent._d):
-            for j in range(agent._d):
-                if version == "rule_1" or version == "rule_2" or version == "agent_1" or version == "agent_2":
-                    agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
-
-                    if not part2_flag:
-                        updated_queue.put((-1 * agent._belief_states[i][j], (i, j)))
-                    else:
-                        priority = -1 * (agent._belief_states[i][j] + agent.proximity_history[i][j])
-                        updated_queue.put((priority, (i, j)))
-
-                # NOTE the version == "improved" if condition should rly go here but agent_3 is kind of wack
-                elif version == "agent_3" or version == "improved":
-                    agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
-
-                    if not part2_flag:
-                        updated_queue.put(((_calculate_distance(observed_cell, (i, j)) + 1) / agent._belief_states[i][j], (i, j)))
-                    else:
-                        priority = (_calculate_distance(observed_cell, (i, j)) + 1) / agent._belief_states[i][j] + agent.proximity_history[i][j]
-                        updated_queue.put((priority, (i, j)))
-
-        return updated_queue
-
-
-def _normalize_belief_states_rule_2(agent, total_probability_sum: int, updated_queue: PriorityQueue):
-        """
-        Scale the probability values so the total probability is 1
-        :param total_probability_sum:
-        :param updated_queue:
-        :return:
-        """
-
-        scaling_factor = 1 / total_probability_sum
-        print("scaling: ", scaling_factor)
-        for i in range(agent._d):
-            for j in range(agent._d):
-                agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
-                updated_queue.put((-1 * agent._belief_states[i][j], (i, j)))
-
-        return updated_queue
-
-
-def _update_belief_states_rule_2(agent, version: str):
-
-    updated_queue = PriorityQueue()
-    total_probability_sum = 0
-
-    for i in range(agent._d):
-        for j in range(agent._d):
-            agent._belief_states[i][j] *= (1 - agent._landscape[i][j])
-            total_probability_sum += agent._belief_states[i][j]
-
-    # Normalize probabilities
-    agent._probability_queue = _normalize_belief_states_rule_2(agent, total_probability_sum, updated_queue)
-
 def _calculate_landscape_score(agent, i: int, j: int) -> float:
     """
     Return the average terrain value of a cell's neighbors
@@ -324,7 +237,6 @@ def _calculate_landscape_score(agent, i: int, j: int) -> float:
 
     # Get the average score
     neighbor_average = neighbor_sum / neighbors
-
     return neighbor_average
 
 def _pick_improved_initial_cell(agent) -> Tuple[int, int]:
@@ -351,7 +263,21 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
 
     if version == "rule_2" or version == "agent_2" or version == "agent_3":
         # Assigns initial probability values based on likelihood target is seen
-        _update_belief_states_rule_2(agent, version)
+        updated_queue = PriorityQueue()
+        total_probability_sum = 0
+
+        for i in range(agent._d):
+            for j in range(agent._d):
+                agent._belief_states[i][j] *= (1 - agent._landscape[i][j])
+                total_probability_sum += agent._belief_states[i][j]
+
+        # Normalize probabilities
+        scaling_factor = 1 / total_probability_sum
+        for i in range(agent._d):
+            for j in range(agent._d):
+                agent._belief_states[i][j] = agent._belief_states[i][j] * scaling_factor
+                updated_queue.put((-1 * agent._belief_states[i][j], (i, j)))
+        agent._probability_queue = updated_queue
 
     target_found = False
     prev_cell = None
@@ -362,10 +288,6 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
     # Pick first cell, random if for rule 1 or agent 1
     if version == "rule_1" or version == "agent_1":
         curr_cell = _pick_random_cell()
-        print("Current cell", curr_cell)
-        print("Target cell", self.target)
-        print(search_count)
-        print(move_count)
         target_found = _search_cell(agent, curr_cell)
 
         # Find whether we're 5 distance if target not found for part 2
@@ -387,10 +309,6 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
         if not target_found and part2_flag:
             _update_part_2(agent, curr_cell)
 
-        print("Current cell", curr_cell)
-        print("Target cell", agent.target)
-        print(search_count)
-        print(move_count)
         target_found = _search_cell(agent, curr_cell)
         _update_probability_queue(agent, curr_cell, -1 / self._d ** 2, version, part2_flag)
         prev_cell = (0, curr_cell)
@@ -404,10 +322,6 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
         if not target_found and part2_flag:
             _update_part_2(agent, curr_cell[1])
 
-        print("Current cell", curr_cell[1])
-        print("Target cell", agent.target)
-        print(search_count)
-        print(move_count)
         target_found = _search_cell(agent, curr_cell[1])
         _update_probability_queue(agent, curr_cell[1], agent._belief_states[curr_cell[1][0]][curr_cell[1][1]], version, part2_flag)
 
@@ -424,10 +338,7 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
             if not target_found and part2_flag:
                 _update_part_2(agent, curr_cell[1])
 
-            print("Current cell", curr_cell)
-            print("Target cell", agent.target)
             search_count += 1
-            print(search_count)
             target_found = _search_cell(agent, curr_cell[1])
             _update_probability_queue(agent, curr_cell[1], curr_cell[0], version, part2_flag)
 
@@ -447,12 +358,7 @@ def begin_search(agent, version: str, part2_flag=None) -> Tuple[int, int, int]:
 
             # Calculate number of actions moving to curr cell would take
             move_count += _calculate_distance(curr_cell[1], prev_cell[1])
-
-            print("Current cell", curr_cell)
-            print("Target cell", agent.target)
             search_count += 1
-            print(search_count)
-            print(move_count)
             target_found = _search_cell(agent, curr_cell[1])
             _update_probability_queue(agent, curr_cell[1], agent._belief_states[curr_cell[1][0]][curr_cell[1][1]], version, part2_flag)
             prev_cell = curr_cell
